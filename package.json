@@ -1,0 +1,19 @@
+{
+  "name": "sms-platform",
+  "private": true,
+  "workspaces": [
+    "apps/*",
+    "services/*"
+  ],
+  "scripts": {
+    "dev": "npm run dev:web",
+    "dev:web": "npm --workspace @sms/web run dev",
+    "dev:api": "npm --workspace @sms/api run dev",
+    "build": "npm run build:web && npm run build:api",
+    "build:web": "npm --workspace @sms/web run build",
+    "build:api": "npm --workspace @sms/api run build"
+  },
+  "dependencies": {
+    "next": "^15.3.2"
+  }
+}
