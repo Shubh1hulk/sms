@@ -1,7 +1,7 @@
 'use client';
 
 import { useRouter } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 
 type Student = {
   id: string;
@@ -35,6 +35,7 @@ function formatMoney(cents: number) {
 
 export default function FeesForm({ students, invoices, payments }: { students: Student[]; invoices: FeeInvoice[]; payments: FeePayment[] }) {
   const router = useRouter();
+  const [selectedInvoiceId, setSelectedInvoiceId] = useState<string | null>(null);
   const [studentId, setStudentId] = useState(students[0]?.id ?? '');
   const [term, setTerm] = useState('Spring 2026');
   const [amount, setAmount] = useState('1840');
@@ -47,14 +48,42 @@ export default function FeesForm({ students, invoices, payments }: { students: S
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
+  const activeInvoice = useMemo(
+    () => invoices.find((invoice) => invoice.id === selectedInvoiceId) ?? null,
+    [invoices, selectedInvoiceId]
+  );
+
+  function resetInvoiceForm() {
+    setSelectedInvoiceId(null);
+    setStudentId(students[0]?.id ?? '');
+    setTerm('Spring 2026');
+    setAmount('1840');
+    setDueDate('2026-05-30');
+    setNotes('Semester tuition and activity coverage.');
+  }
+
+  function startEditInvoice(invoice: FeeInvoice) {
+    setSelectedInvoiceId(invoice.id);
+    const student = students[0];
+    if (student) {
+      setStudentId(student.id);
+    }
+    setTerm(invoice.term);
+    setAmount((invoice.amountCents / 100).toString());
+    setDueDate(invoice.dueDate);
+    setNotes(`Invoice status: ${invoice.status}`);
+  }
+
   async function createInvoice(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     setBusy(true);
 
     try {
-      const response = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000'}/api/fees/invoices`, {
-        method: 'POST',
+      const response = await fetch(
+        `${process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000'}/api/fees/invoices${selectedInvoiceId ? `/${selectedInvoiceId}` : ''}`,
+        {
+        method: selectedInvoiceId ? 'PATCH' : 'POST',
         credentials: 'include',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -64,13 +93,15 @@ export default function FeesForm({ students, invoices, payments }: { students: S
           dueDate,
           notes
         })
-      });
+        }
+      );
 
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string };
         throw new Error(payload.error ?? 'Unable to create invoice.');
       }
 
+      resetInvoiceForm();
       router.refresh();
     } catch (thrownError) {
       setError(thrownError instanceof Error ? thrownError.message : 'Unable to create invoice.');
@@ -102,6 +133,7 @@ export default function FeesForm({ students, invoices, payments }: { students: S
         throw new Error(payload.error ?? 'Unable to record payment.');
       }
 
+      setInvoiceId(invoices[0]?.id ?? '');
       router.refresh();
     } catch (thrownError) {
       setError(thrownError instanceof Error ? thrownError.message : 'Unable to record payment.');
@@ -143,8 +175,13 @@ export default function FeesForm({ students, invoices, payments }: { students: S
           </label>
         </div>
         <button className="submit-button" type="submit" disabled={busy}>
-          {busy ? 'Saving...' : 'Create invoice'}
+          {busy ? 'Saving...' : selectedInvoiceId ? 'Update invoice' : 'Create invoice'}
         </button>
+        {selectedInvoiceId ? (
+          <button className="submit-button secondary-button" type="button" onClick={resetInvoiceForm} disabled={busy}>
+            Cancel edit
+          </button>
+        ) : null}
       </form>
 
       <form className="workflow-form card" onSubmit={recordPayment}>
@@ -191,6 +228,27 @@ export default function FeesForm({ students, invoices, payments }: { students: S
                 <span>{invoice.status}</span>
                 <span>Balance {formatMoney(invoice.balanceCents)}</span>
               </div>
+              <div className="record-actions">
+                <button className="record-button" type="button" onClick={() => startEditInvoice(invoice)}>
+                  Edit
+                </button>
+                <button
+                  className="record-button danger"
+                  type="button"
+                  onClick={async () => {
+                    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000'}/api/fees/invoices/${invoice.id}`, {
+                      method: 'DELETE',
+                      credentials: 'include'
+                    });
+                    if (selectedInvoiceId === invoice.id) {
+                      resetInvoiceForm();
+                    }
+                    router.refresh();
+                  }}
+                >
+                  Delete
+                </button>
+              </div>
             </article>
           ))}
         </div>
@@ -206,6 +264,21 @@ export default function FeesForm({ students, invoices, payments }: { students: S
               <div className="record-meta">
                 <span>{formatMoney(payment.amountCents)}</span>
                 <span>{new Date(payment.paidAt).toLocaleDateString()}</span>
+              </div>
+              <div className="record-actions">
+                <button
+                  className="record-button danger"
+                  type="button"
+                  onClick={async () => {
+                    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL ?? 'http://localhost:4000'}/api/fees/payments/${payment.id}`, {
+                      method: 'DELETE',
+                      credentials: 'include'
+                    });
+                    router.refresh();
+                  }}
+                >
+                  Void
+                </button>
               </div>
             </article>
           ))}

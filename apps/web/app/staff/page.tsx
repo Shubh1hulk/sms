@@ -1,8 +1,16 @@
 import { getDashboardSnapshot } from '@/lib/api';
+import { getCurrentSession } from '@/lib/session';
 import RolePortal from '@/components/role-portal';
 import SiteHeader from '@/components/site-header';
+import { redirect } from 'next/navigation';
 
 export default async function StaffPage() {
+  const session = await getCurrentSession();
+
+  if (!session || (session.role !== 'staff' && session.role !== 'admin')) {
+    redirect('/login');
+  }
+
   const snapshot = await getDashboardSnapshot();
 
   return (

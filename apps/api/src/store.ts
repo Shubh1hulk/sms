@@ -81,6 +81,19 @@ export type FeePaymentRecord = {
   paidAt: string;
 };
 
+export type AuditLogEntry = {
+  id: string;
+  actorId: string | null;
+  actorName: string;
+  actorRole: string;
+  eventType: string;
+  entityType: string;
+  entityId: string | null;
+  summary: string;
+  metadata: string;
+  createdAt: string;
+};
+
 const dataDirectory = join(process.cwd(), 'data');
 mkdirSync(dataDirectory, { recursive: true });
 
@@ -216,6 +229,19 @@ database.exec(`
     FOREIGN KEY (invoice_id) REFERENCES fee_invoices(id) ON DELETE CASCADE,
     FOREIGN KEY (student_id) REFERENCES students(id) ON DELETE CASCADE
   );
+
+  CREATE TABLE IF NOT EXISTS audit_log (
+    id TEXT PRIMARY KEY,
+    actor_id TEXT,
+    actor_name TEXT NOT NULL,
+    actor_role TEXT NOT NULL,
+    event_type TEXT NOT NULL,
+    entity_type TEXT NOT NULL,
+    entity_id TEXT,
+    summary TEXT NOT NULL,
+    metadata TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
 `);
 
 function nowIso() {
@@ -236,6 +262,41 @@ function queryOne<T>(sql: string, params: Record<string, unknown> = {}): T | und
 
 function execute(sql: string, params: Record<string, unknown> = {}) {
   return database.prepare(sql).run(params as Record<string, any>);
+}
+
+function logAudit(input: {
+  actorId: string | null;
+  actorName: string;
+  actorRole: string;
+  eventType: string;
+  entityType: string;
+  entityId: string | null;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  const record = {
+    id: uuid(),
+    actorId: input.actorId,
+    actorName: input.actorName,
+    actorRole: input.actorRole,
+    eventType: input.eventType,
+    entityType: input.entityType,
+    entityId: input.entityId,
+    summary: input.summary,
+    metadata: JSON.stringify(input.metadata ?? {}),
+    createdAt: nowIso()
+  };
+
+  execute(
+    `INSERT INTO audit_log (
+      id, actor_id, actor_name, actor_role, event_type, entity_type, entity_id, summary, metadata, created_at
+    ) VALUES (
+      @id, @actorId, @actorName, @actorRole, @eventType, @entityType, @entityId, @summary, @metadata, @createdAt
+    )`,
+    record
+  );
+
+  return record;
 }
 
 function hashPassword(password: string, salt = crypto.randomBytes(16).toString('hex')) {
@@ -483,6 +544,31 @@ function seedDatabase() {
          VALUES (@id, @invoiceId, @studentId, @amountCents, @method, @reference, @paidAt)`,
         { id: uuid(), ...payment, paidAt: timestamp }
       );
+    });
+
+    [
+      {
+        actorId: users[3].id,
+        actorName: users[3].name,
+        actorRole: 'admin',
+        eventType: 'system.seed',
+        entityType: 'database',
+        entityId: null,
+        summary: 'Seeded the initial campus dataset',
+        metadata: { tables: ['users', 'students', 'schedule_items', 'grades', 'tasks', 'admissions', 'attendance_records', 'fee_invoices', 'fee_payments'] }
+      },
+      {
+        actorId: users[3].id,
+        actorName: users[3].name,
+        actorRole: 'admin',
+        eventType: 'system.seed',
+        entityType: 'security',
+        entityId: null,
+        summary: 'Provisioned demo identity and workflow access',
+        metadata: { roles: ['student', 'parent', 'staff', 'admin'] }
+      }
+    ].forEach((entry) => {
+      logAudit(entry);
     });
 
     database.exec('COMMIT');
@@ -754,6 +840,259 @@ export function recordPayment(input: { invoiceId: string; amountCents: number; m
   }
 
   return { ...record, remainingCents: remaining, status: newStatus };
+}
+
+export function listAuditEntries(limit = 40) {
+  return queryAll<AuditLogEntry>(
+    'SELECT * FROM audit_log ORDER BY created_at DESC, rowid DESC LIMIT @limit',
+    { limit }
+  ).map((entry) => ({
+    ...entry,
+    metadata: entry.metadata
+  }));
+}
+
+export function appendAuditLog(input: {
+  actorId: string | null;
+  actorName: string;
+  actorRole: string;
+  eventType: string;
+  entityType: string;
+  entityId: string | null;
+  summary: string;
+  metadata?: Record<string, unknown>;
+}) {
+  return logAudit(input);
+}
+
+export function getAdmissionById(admissionId: string) {
+  return queryOne<AdmissionRecord>('SELECT * FROM admissions WHERE id = @admissionId', { admissionId });
+}
+
+export function updateAdmission(admissionId: string, input: { applicantName: string; guardianEmail: string; intendedGrade: string; notes: string }) {
+  const existing = getAdmissionById(admissionId);
+
+  if (!existing) {
+    throw new Error('Admission not found');
+  }
+
+  const record = {
+    id: existing.id,
+    applicantName: input.applicantName.trim(),
+    guardianEmail: input.guardianEmail.trim(),
+    intendedGrade: input.intendedGrade.trim(),
+    notes: input.notes.trim(),
+    status: existing.status,
+    createdAt: existing.createdAt
+  };
+
+  execute(
+    `UPDATE admissions
+     SET applicant_name = @applicantName,
+         guardian_email = @guardianEmail,
+         intended_grade = @intendedGrade,
+         notes = @notes
+     WHERE id = @id`,
+    record
+  );
+
+  return record;
+}
+
+export function deleteAdmission(admissionId: string) {
+  const existing = getAdmissionById(admissionId);
+
+  if (!existing) {
+    throw new Error('Admission not found');
+  }
+
+  execute('DELETE FROM admissions WHERE id = @admissionId', { admissionId });
+  return existing;
+}
+
+export function getAttendanceById(attendanceId: string) {
+  return queryOne<AttendanceRecord>('SELECT * FROM attendance_records WHERE id = @attendanceId', { attendanceId });
+}
+
+export function updateAttendance(attendanceId: string, input: { studentId: string; date: string; status: string; notes: string }) {
+  const existing = getAttendanceById(attendanceId);
+
+  if (!existing) {
+    throw new Error('Attendance record not found');
+  }
+
+  const student = queryOne<StudentRecord>('SELECT * FROM students WHERE id = @studentId', { studentId: input.studentId });
+
+  if (!student) {
+    throw new Error('Student not found');
+  }
+
+  const record = {
+    id: existing.id,
+    studentId: student.id,
+    studentName: student.name,
+    className: `Grade ${student.grade}${student.section}`,
+    attendanceDate: input.date,
+    status: input.status,
+    notes: input.notes.trim(),
+    markedBy: existing.markedBy,
+    createdAt: existing.createdAt
+  };
+
+  execute(
+    `UPDATE attendance_records
+     SET student_id = @studentId,
+         student_name = @studentName,
+         class_name = @className,
+         attendance_date = @attendanceDate,
+         status = @status,
+         notes = @notes
+     WHERE id = @id`,
+    record
+  );
+
+  return record;
+}
+
+export function deleteAttendance(attendanceId: string) {
+  const existing = getAttendanceById(attendanceId);
+
+  if (!existing) {
+    throw new Error('Attendance record not found');
+  }
+
+  execute('DELETE FROM attendance_records WHERE id = @attendanceId', { attendanceId });
+  return existing;
+}
+
+export function getInvoiceById(invoiceId: string) {
+  return queryOne<FeeInvoiceRecord>('SELECT * FROM fee_invoices WHERE id = @invoiceId', { invoiceId });
+}
+
+export function updateInvoice(invoiceId: string, input: { studentId: string; term: string; amountCents: number; dueDate: string; notes: string }) {
+  const existing = getInvoiceById(invoiceId);
+
+  if (!existing) {
+    throw new Error('Invoice not found');
+  }
+
+  const student = queryOne<StudentRecord>('SELECT * FROM students WHERE id = @studentId', { studentId: input.studentId });
+
+  if (!student) {
+    throw new Error('Student not found');
+  }
+
+  const delta = input.amountCents - existing.amountCents;
+  const newBalance = Math.max(existing.balanceCents + delta, 0);
+
+  const record = {
+    id: existing.id,
+    studentId: student.id,
+    studentName: student.name,
+    term: input.term.trim(),
+    amountCents: input.amountCents,
+    balanceCents: newBalance,
+    dueDate: input.dueDate,
+    status: newBalance === 0 ? 'paid' : existing.status,
+    notes: input.notes.trim(),
+    createdAt: existing.createdAt
+  };
+
+  database.exec('BEGIN');
+
+  try {
+    execute(
+      `UPDATE fee_invoices
+       SET student_id = @studentId,
+           student_name = @studentName,
+           term = @term,
+           amount_cents = @amountCents,
+           balance_cents = @balanceCents,
+           due_date = @dueDate,
+           status = @status,
+           notes = @notes
+       WHERE id = @id`,
+      record
+    );
+
+    if (delta !== 0) {
+      execute(
+        `UPDATE students SET fee_balance_cents = MAX(fee_balance_cents + @delta, 0) WHERE id = @studentId`,
+        { delta, studentId: student.id }
+      );
+    }
+
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+
+  return record;
+}
+
+export function deleteInvoice(invoiceId: string) {
+  const existing = getInvoiceById(invoiceId);
+
+  if (!existing) {
+    throw new Error('Invoice not found');
+  }
+
+  database.exec('BEGIN');
+
+  try {
+    execute('UPDATE students SET fee_balance_cents = MAX(fee_balance_cents - @balanceCents, 0) WHERE id = @studentId', {
+      balanceCents: existing.balanceCents,
+      studentId: existing.studentId
+    });
+    execute('DELETE FROM fee_invoices WHERE id = @invoiceId', { invoiceId });
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+
+  return existing;
+}
+
+export function getPaymentById(paymentId: string) {
+  return queryOne<FeePaymentRecord>('SELECT * FROM fee_payments WHERE id = @paymentId', { paymentId });
+}
+
+export function deletePayment(paymentId: string) {
+  const existing = getPaymentById(paymentId);
+
+  if (!existing) {
+    throw new Error('Payment not found');
+  }
+
+  const invoice = getInvoiceById(existing.invoiceId);
+
+  database.exec('BEGIN');
+
+  try {
+    execute('DELETE FROM fee_payments WHERE id = @paymentId', { paymentId });
+
+    if (invoice) {
+      const restoredBalance = invoice.balanceCents + existing.amountCents;
+      execute(
+        `UPDATE fee_invoices SET balance_cents = @balanceCents, status = CASE WHEN @balanceCents = 0 THEN 'paid' ELSE 'partial' END WHERE id = @invoiceId`,
+        { balanceCents: restoredBalance, invoiceId: invoice.id }
+      );
+
+      execute(
+        `UPDATE students SET fee_balance_cents = fee_balance_cents + @amountCents WHERE id = @studentId`,
+        { amountCents: existing.amountCents, studentId: invoice.studentId }
+      );
+    }
+
+    database.exec('COMMIT');
+  } catch (error) {
+    database.exec('ROLLBACK');
+    throw error;
+  }
+
+  return existing;
 }
 
 export function getAllAnnouncements() {

@@ -13,11 +13,12 @@ export default async function HomePage() {
         title="Nova Campus"
         subtitle="Student management, redesigned for modern campuses."
         links={[
-          { href: '#overview', label: 'Overview' },
-          { href: '#schedule', label: 'Schedule' },
-          { href: '#grades', label: 'Grades' },
-          { href: '#activity', label: 'Activity' },
-          { href: '#modules', label: 'Modules' },
+          { href: '/overview', label: 'Overview' },
+          { href: '/about', label: 'About' },
+          { href: '/schedule', label: 'Schedule' },
+          { href: '/grades', label: 'Grades' },
+          { href: '/activity', label: 'Activity' },
+          { href: '/modules', label: 'Modules' },
           { href: '/admissions', label: 'Admissions' },
           { href: '/attendance', label: 'Attendance' },
           { href: '/fees', label: 'Fees' }
@@ -34,10 +35,10 @@ export default async function HomePage() {
             portal, with live updates, sharp visuals, and simple workflows.
           </p>
           <div className="hero-actions">
-            <a className="button primary" href="#modules">
+            <a className="button primary" href="/modules">
               Explore modules
             </a>
-            <a className="button secondary" href="#activity">
+            <a className="button secondary" href="/activity">
               View live activity
             </a>
           </div>
@@ -78,6 +79,40 @@ export default async function HomePage() {
             </div>
           ))}
         </aside>
+      </section>
+
+      <section className="card about-shell" id="about">
+        <h3 className="section-title section-title-large">About the stack</h3>
+        <div className="about-grid">
+          <article className="about-card">
+            <strong>Frontend execution model</strong>
+            <p>
+              Next.js 15 App Router, React Server Components for data fetching, and client islands
+              only for stateful interactions like login, admission intake, and invoice creation.
+            </p>
+          </article>
+          <article className="about-card">
+            <strong>API contract</strong>
+            <p>
+              Express exposes REST endpoints for auth and workflows. Session cookies are HttpOnly,
+              SameSite=Lax, and backed by SQLite rows with explicit expiry timestamps.
+            </p>
+          </article>
+          <article className="about-card">
+            <strong>Persistence layer</strong>
+            <p>
+              The primary store uses Node 22 <code>node:sqlite</code> with schema-level constraints,
+              foreign keys, and seeded records for immediate demoability.
+            </p>
+          </article>
+          <article className="about-card">
+            <strong>Analytics path</strong>
+            <p>
+              FastAPI is reserved for reporting and automation workloads so transactional writes do
+              not compete with heavier insight jobs.
+            </p>
+          </article>
+        </div>
       </section>
 
       <RoleDashboard snapshot={snapshot} />

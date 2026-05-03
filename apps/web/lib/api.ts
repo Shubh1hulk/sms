@@ -9,6 +9,19 @@ export type DashboardSnapshot = {
   attendance: Array<{ name: string; className: string; status: string }>;
 };
 
+export type AuditLogEntry = {
+  id: string;
+  actorId: string | null;
+  actorName: string;
+  actorRole: string;
+  eventType: string;
+  entityType: string;
+  entityId: string | null;
+  summary: string;
+  metadata: string;
+  createdAt: string;
+};
+
 const fallback: DashboardSnapshot = {
   profile: {
     name: 'Ava Brooks',
